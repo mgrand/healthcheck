@@ -34,19 +34,20 @@ import java.net.SocketException;
  * @author mxg88rm
  */
 public class HealthCheck {
-    public static final String OK_MESSAGE = "Health check is OK!\r\n";
-    public static final String ENVELOPE_TERMINATOR = "\r\n\r\n";
-    public static final String OK_HTTP_PREFIX = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + OK_MESSAGE.length() + ENVELOPE_TERMINATOR;
+    private static final Logger log = LoggerFactory.getLogger(HealthCheck.class);
+
+    private static final String OK_MESSAGE = "Health check is OK!\r\n";
+    private static final String ENVELOPE_TERMINATOR = "\r\n\r\n";
+    private static final String OK_HTTP_PREFIX = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + OK_MESSAGE.length() + ENVELOPE_TERMINATOR;
     public static final String OK_RESPONSE = OK_HTTP_PREFIX + OK_MESSAGE;
-    public static final String BAD_MESSAGE = "Health check is Bad\r\n";
-    public static final String BAD_HTTP_PREFIX = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: " + BAD_MESSAGE.length() + ENVELOPE_TERMINATOR;
+    private static final String BAD_MESSAGE = "Health check is Bad\r\n";
+    private static final String BAD_HTTP_PREFIX = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: " + BAD_MESSAGE.length() + ENVELOPE_TERMINATOR;
     public static final String BAD_RESPONSE = BAD_HTTP_PREFIX + BAD_MESSAGE;
-    public static final String FATAL_MESSAGE = "Unrecoverable error\r\n";
-    public static final String FATAL_HTTP_PREFIX = "HTTP/1.1 500 Server Error\r\nContent-Type: text/plain\r\nContent-Length: " + FATAL_MESSAGE.length() + ENVELOPE_TERMINATOR;
+    private static final String FATAL_MESSAGE = "Unrecoverable error\r\n";
+    private static final String FATAL_HTTP_PREFIX = "HTTP/1.1 500 Server Error\r\nContent-Type: text/plain\r\nContent-Length: " + FATAL_MESSAGE.length() + ENVELOPE_TERMINATOR;
     public static final String FATAL_RESPONSE = FATAL_HTTP_PREFIX + FATAL_MESSAGE;
     public static final int DEFAULT_PORT = 14193;
-    public static final String SHUTDOWN_WARNING = "Exception thrown out of health check runner. The health check response is shutting down which may result in this JVM being killed.";
-    static final Logger log = LoggerFactory.getLogger(HealthCheck.class);
+    private static final String SHUTDOWN_WARNING = "Exception thrown out of health check runner. The health check response is shutting down which may result in this JVM being killed.";
     private static final int MAX_WAIT_FOR_SERVER_SOCKET_BINDING_MILLIS = 100;
     private static final int MAX_LISTENER_BACKLOG = 20;
     private static final int DEFAULT_INTERNAL_HEARTBEAT_MILLIS = 10500;
@@ -90,7 +91,7 @@ public class HealthCheck {
             runner.start();
             Thread.yield();
             handleInterruptedException(() -> {
-                while (!Thread.currentThread().isInterrupted()) {
+                while (!stopping && !Thread.currentThread().isInterrupted()) {
                     //noinspection SynchronizeOnNonFinalField
                     synchronized (runner) {
                         if (runner.isServerSocketBound()) {
@@ -191,8 +192,8 @@ public class HealthCheck {
 
         @Override
         public void run() {
-            try {
-                serverSocket = new ServerSocket(port, MAX_LISTENER_BACKLOG);
+            try (ServerSocket ss = new ServerSocket(port, MAX_LISTENER_BACKLOG)) {
+                serverSocket = ss;
                 log.info("HealthCheckRunner has started on port {}", port);
                 if (log.isDebugEnabled()) {
                     logServerSocketDetails(serverSocket);
@@ -210,14 +211,6 @@ public class HealthCheck {
             } catch (Exception e) {
                 log.error(SHUTDOWN_WARNING, e);
             } finally {
-                try {
-                    if (serverSocket != null) {
-                        serverSocket.close();
-                        serverSocket = null;
-                    }
-                } catch (IOException e) {
-                    log.warn("close for ServerSocket for HealthCheck threw an exception when being closed for shutdown.", e);
-                }
                 log.info("HealthCheckRunner has shut down");
                 synchronized (this) {
                     notifyAll();
@@ -237,8 +230,9 @@ public class HealthCheck {
                     log.debug("Waiting for connection on {}", serverSocket);
                 }
                 try (Socket socket = serverSocket.accept()) {
-                    String response = fatalError ? FATAL_RESPONSE
-                                              : ((System.currentTimeMillis() <= dropDeadTime) ? OK_RESPONSE : BAD_RESPONSE);
+                    String response;
+                    if (fatalError) response = FATAL_RESPONSE;
+                    else response = (System.currentTimeMillis() <= dropDeadTime) ? OK_RESPONSE : BAD_RESPONSE;
                     log.info("Responding to health check with {}", response);
                     try (OutputStream out = socket.getOutputStream()) {
                         out.write(response.getBytes());
