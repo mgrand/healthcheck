@@ -1,2 +1,2 @@
 # healthcheck
-Configurable Health Check Service with no External Dependencies
+Configurable Health Check Service with minimal dependencies
