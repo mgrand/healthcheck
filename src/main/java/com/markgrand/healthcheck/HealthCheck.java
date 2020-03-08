@@ -50,7 +50,7 @@ public class HealthCheck {
     private static final String SHUTDOWN_WARNING = "Exception thrown out of health check runner. The health check response is shutting down which may result in this JVM being killed.";
     private static final int MAX_WAIT_FOR_SERVER_SOCKET_BINDING_MILLIS = 100;
     private static final int MAX_LISTENER_BACKLOG = 20;
-    private static final int DEFAULT_INTERNAL_HEARTBEAT_MILLIS = 10500;
+    static final int DEFAULT_INTERNAL_HEARTBEAT_MILLIS = 10500;
 
     private static long runnerCount = 1;
 
@@ -151,7 +151,7 @@ public class HealthCheck {
 
     /**
      * Set the maximum number of milliseconds that can pass between calls to {@link #heartbeat()} before the health
-     * check starts returning 503 responses.
+     * check starts returning 503 responses. Also calls {@link #heartbeat()} internally.
      *
      * @param internalHeartbeatMillis the maximum number of milliseconds that can elapse between calls to {@link
      *                                #heartbeat()} before the health * check starts returning responses indicating an
@@ -161,6 +161,7 @@ public class HealthCheck {
     @SuppressWarnings("unused")
     public HealthCheck setInternalHeartbeatMillis(int internalHeartbeatMillis) {
         this.internalHeartbeatMillis = internalHeartbeatMillis;
+        heartbeat();
         return this;
     }
 
@@ -231,8 +232,12 @@ public class HealthCheck {
                 }
                 try (Socket socket = serverSocket.accept()) {
                     String response;
-                    if (fatalError) response = FATAL_RESPONSE;
-                    else response = (System.currentTimeMillis() <= dropDeadTime) ? OK_RESPONSE : BAD_RESPONSE;
+                    if (fatalError) {
+                        response = FATAL_RESPONSE;
+                    } else {
+                        long now = System.currentTimeMillis();
+                        response = (now <= dropDeadTime) ? OK_RESPONSE : BAD_RESPONSE;
+                    }
                     log.info("Responding to health check with {}", response);
                     try (OutputStream out = socket.getOutputStream()) {
                         out.write(response.getBytes());
